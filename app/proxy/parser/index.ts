@@ -12,6 +12,7 @@ export default class ProxyParser extends Writable {
 
     private bufferStream: BufferStream;
     private pendingBuffers: Buffer[] = [];
+    private pending: number = 0;
     private promises: Promise<String>[] = [];
 
     constructor(
@@ -60,9 +61,11 @@ export default class ProxyParser extends Writable {
                 if (typeof result === 'string') {
                     buffers.push(Buffer.from(result));
                 } else {
+                    // content is not ready yet so we are pushing a null value
                     this.promises.push(result);
+                    // we actually know the index to write to.....
                     buffers.push(null);
-                    this.handlePromise(result);
+                    this.handlePromise(result, buffers.length - 1);
                 }
                 j = i;
             }
@@ -80,7 +83,7 @@ export default class ProxyParser extends Writable {
                 // nothing pending write until we encounter a null
                 this.bufferStream.write(Buffer.concat(buffers.slice(0, firstNull)), callback);
             }
-            this.pendingBuffers = this.pendingBuffers.concat(buffers.slice(firstNull));
+            this.pendingBuffers = this.pendingBuffers.concat(buffers);
         } else {
             this.bufferStream.write(Buffer.concat(buffers), callback);
         }
@@ -97,42 +100,29 @@ export default class ProxyParser extends Writable {
         return this.tagHandler(tag, this);
     }
 
-    handlePromise(promise: Promise<string>) {
+    handlePromise(promise: Promise<string>, index: number) {
         promise.then((value) => {
-            this.providePending(promise, value);
+            this.providePending(promise, value, index);
             this.flushPending();
         });
     }
 
-    private providePending(promise: Promise<string>, value: string) {
-        const pendingIndex = this.promises.indexOf(promise);
-        this.promises.splice(pendingIndex, 1);
-        let j = 0;
-        for (let i = 0, ii = this.pendingBuffers.length; i < ii; i++) {
-            if (null === this.pendingBuffers[i]) {
-                if (j === pendingIndex) {
-                    this.pendingBuffers[pendingIndex] = Buffer.from(value);
-                    break;
-                }
-                j++;
-            }
-        }
+    private providePending(promise: Promise<string>, value: string, index: number) {
+        this.pendingBuffers[index] = Buffer.from(value);
     }
 
     private flushPending() {
         const nextPendingNull = this.pendingBuffers.indexOf(null);
         let result: Buffer;
+        // we will write till the nextNull and starting from this.pending
         if (nextPendingNull === -1) {
-            result = Buffer.concat(this.pendingBuffers);
+            // nothing pending flush them all
+            result = Buffer.concat(this.pendingBuffers.splice(this.pending));
+            this.pending = 0;
         } else {
-            result = Buffer.concat(this.pendingBuffers.slice(0, nextPendingNull));
+            result = Buffer.concat(this.pendingBuffers.slice(this.pending, nextPendingNull));
+            this.pending = nextPendingNull;
         }
         this.bufferStream.write(result);
-        this.clearPendingBuffer();
-    }
-
-    private clearPendingBuffer() {
-        const nextNull = this.pendingBuffers.indexOf(null);
-        this.pendingBuffers = this.pendingBuffers.slice(nextNull);
     }
 }

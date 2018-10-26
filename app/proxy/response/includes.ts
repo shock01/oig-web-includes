@@ -6,6 +6,8 @@ import { Tag } from "./tag";
 
 export default class IncludesResponse implements Handler {
 
+    private handled = 0;
+
     constructor(
         private req: http.IncomingMessage,
         private res: http.ServerResponse,
@@ -75,7 +77,10 @@ export default class IncludesResponse implements Handler {
         if (tag.name === 'esi:include') {
             // return Promise.resolve('<div>INCLUDED</div>');
             return new Promise<string>((resolve) => {
-                setTimeout(() => resolve('<div>INCLUDED</div>'), 100);
+                // DOES NOT WORK YET
+                this.handled++;
+                console.log('handled', this.handled)
+                setTimeout(() => resolve('<div>INCLUDED</div>'), this.handled * 1000);
             });
         }
         return `<!-- ${tag.name} -->`;
