@@ -15,7 +15,7 @@ export default class ProxyParser extends Writable {
     private pendingBuffers: Buffer[] = [];
     private html: Promise<string>[] = [];
     private beforeend: (Promise<string> | string)[] = [];
-    
+
     private pending: number = 0;
     constructor(
         private tagCallback: TagCallback,
@@ -56,6 +56,7 @@ export default class ProxyParser extends Writable {
         do {
             value = buffer.slice(j, i).toString();
             const matches = regexTag.exec(value);
+
             if (matches) {
                 const [, tag, attributes, textContent] = matches;
                 buffers.push(Buffer.from((<any>RegExp).leftContext));
@@ -91,10 +92,6 @@ export default class ProxyParser extends Writable {
         const firstNull = buffers.indexOf(null);
 
         if (firstPendingNull > -1 || firstNull > -1) {
-            if (!this.pendingBuffers.length) {
-                // nothing pending write until we encounter a null
-                this.bufferStream.write(Buffer.concat(buffers.slice(0, firstNull)), callback);
-            }
             this.pendingBuffers = this.pendingBuffers.concat(buffers);
         } else {
             this.bufferStream.write(Buffer.concat(buffers), callback);
