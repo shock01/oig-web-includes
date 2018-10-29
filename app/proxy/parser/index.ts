@@ -15,6 +15,7 @@ export default class ProxyParser extends Writable {
     private pendingBuffers: Buffer[] = [];
     private html: Promise<string>[] = [];
     private beforeend: (Promise<string> | string)[] = [];
+    
     private pending: number = 0;
     constructor(
         private tagCallback: TagCallback,
@@ -66,7 +67,6 @@ export default class ProxyParser extends Writable {
                 } else {
                     // content is not ready yet so we are pushing a null value
                     this.html.push(html);
-                    // we actually know the index to write to.....
                     buffers.push(null);
                     this.handleHtml(html, buffers.length - 1);
                 }
@@ -74,7 +74,7 @@ export default class ProxyParser extends Writable {
                     this.beforeend.push(beforeend);
                 }
                 j = i;
-            } else if (value.indexOf('</body>') > -1) {
+            } else if (/<\/body>/i.test(value)) {
                 buffers.push(null);
                 let html = this.handleBeforeEnd(value);
                 this.html.push(html);

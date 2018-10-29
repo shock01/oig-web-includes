@@ -20,5 +20,5 @@ export abstract class Handler implements TagHandler {
     beforeend(): Promise<string> | string {
         return null;
     }
-    
+
 }
