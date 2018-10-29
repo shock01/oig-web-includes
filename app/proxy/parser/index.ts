@@ -1,10 +1,11 @@
 import { Writable, Readable } from "stream";
 
 import { BufferStream } from '../../streams';
-import { Tag, parseTag } from "../response/tag";
+import { Tag, parseTag } from "./tag";
+import { TagHandler } from "./taghandler";
 
-export interface TagHandler {
-    (tag: Tag, response: ProxyParser): Promise<string> | string;
+export interface TagCallback {
+    (tag: Tag, response: ProxyParser): TagHandler;
 }
 
 const regexTag = /<((?:pipe|esi)\:[a-z]+)\b([^>]+[^\/>])?(?:\/|>([\s\S]*?)<\/\1)>/i;
@@ -12,11 +13,11 @@ export default class ProxyParser extends Writable {
 
     private bufferStream: BufferStream;
     private pendingBuffers: Buffer[] = [];
+    private html: Promise<string>[] = [];
+    private beforeend: (Promise<string> | string)[] = [];
     private pending: number = 0;
-    private promises: Promise<String>[] = [];
-
     constructor(
-        private tagHandler: TagHandler,
+        private tagCallback: TagCallback,
         private source: Readable,
         private target: Writable) {
         super();
@@ -29,7 +30,7 @@ export default class ProxyParser extends Writable {
         this.bufferStream.once('end', () => this.dispose());
         return new Promise((resolve, reject) => {
             this.source.once('end', () => {
-                Promise.all(this.promises)
+                Promise.all(this.html)
                     .then(() => this.bufferStream.end())
                     .then(() => resolve());
             });
@@ -57,16 +58,27 @@ export default class ProxyParser extends Writable {
             if (matches) {
                 const [, tag, attributes, textContent] = matches;
                 buffers.push(Buffer.from((<any>RegExp).leftContext));
-                let result = this.handleTag(parseTag(tag, attributes, textContent));
-                if (typeof result === 'string') {
-                    buffers.push(Buffer.from(result));
+                let tagHandler = this.handleTag(parseTag(tag, attributes, textContent));
+                let html = tagHandler.html();
+                let beforeend = tagHandler.beforeend();
+                if (typeof html === 'string') {
+                    buffers.push(Buffer.from(html));
                 } else {
                     // content is not ready yet so we are pushing a null value
-                    this.promises.push(result);
+                    this.html.push(html);
                     // we actually know the index to write to.....
                     buffers.push(null);
-                    this.handlePromise(result, buffers.length - 1);
+                    this.handleHtml(html, buffers.length - 1);
                 }
+                if (beforeend !== null) {
+                    this.beforeend.push(beforeend);
+                }
+                j = i;
+            } else if (value.indexOf('</body>') > -1) {
+                buffers.push(null);
+                let html = this.handleBeforeEnd(value);
+                this.html.push(html);
+                this.handleHtml(html, buffers.length - 1);
                 j = i;
             }
         } while (i++ < ii)
@@ -89,32 +101,43 @@ export default class ProxyParser extends Writable {
         }
     }
 
+    private handleBeforeEnd(html: string) {
+        if (!this.beforeend.length) {
+            return Promise.resolve(html);
+        }
+        return Promise.all(this.beforeend)
+            .then((value: string[]) => value.reduce((a: string, b: string) => a + b))
+            .then(value => value + html);
+    }
+
     private dispose() {
         this.source.unpipe(this);
         this.bufferStream.unpipe(this.target);
-        this.promises = [];
+        this.html = [];
         this.pendingBuffers = [];
     }
 
-    handleTag(tag: Tag): Promise<string> | string {
-        return this.tagHandler(tag, this);
+    handleTag(tag: Tag): TagHandler {
+        return this.tagCallback(tag, this);
     }
 
-    handlePromise(promise: Promise<string>, index: number) {
+    handleHtml(promise: Promise<string>, index: number) {
         promise.then((value) => {
-            this.providePending(promise, value, index);
+            this.providePending(value, index);
             this.flushPending();
         });
     }
 
-    private providePending(promise: Promise<string>, value: string, index: number) {
+    private providePending(value: string, index: number) {
         this.pendingBuffers[index] = Buffer.from(value);
     }
 
     private flushPending() {
+
         const nextPendingNull = this.pendingBuffers.indexOf(null);
+
         let result: Buffer;
-        // we will write till the nextNull and starting from this.pending
+
         if (nextPendingNull === -1) {
             // nothing pending flush them all
             result = Buffer.concat(this.pendingBuffers.splice(this.pending));
@@ -125,4 +148,6 @@ export default class ProxyParser extends Writable {
         }
         this.bufferStream.write(result);
     }
+
+
 }

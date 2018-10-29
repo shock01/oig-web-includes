@@ -2,11 +2,11 @@ import { Handler } from "./response";
 import ProxyParser from "../parser";
 import { PassThroughResponse } from ".";
 import * as http from 'http';
-import { Tag } from "./tag";
+import { Tag } from "../parser/tag";
+import factory from "./taghandlers/factory";
+import { TagHandler } from "../parser/taghandler";
 
 export default class IncludesResponse implements Handler {
-
-    private handled = 0;
 
     constructor(
         private req: http.IncomingMessage,
@@ -37,7 +37,7 @@ export default class IncludesResponse implements Handler {
         res.writeHead(message.statusCode, headers);
         res.flushHeaders();
         try {
-            const parser = new ProxyParser((tag) => this.handleTag(tag), message, res);
+            const parser = new ProxyParser((tag) => this.tagCallback(tag), message, res);
             await parser.process();
         } catch (e) {
             res.writeHead(500, e.message);
@@ -71,18 +71,7 @@ export default class IncludesResponse implements Handler {
         return true;
     }
 
-    private handleTag(tag: Tag): Promise<string> | string {
-        // when its a pipe we will actually write a marker here
-        // and we will load the content and put it at the end
-        if (tag.name === 'esi:include') {
-            // return Promise.resolve('<div>INCLUDED</div>');
-            return new Promise<string>((resolve) => {
-                // DOES NOT WORK YET
-                this.handled++;
-                console.log('handled', this.handled)
-                setTimeout(() => resolve('<div>INCLUDED</div>'), this.handled * 1000);
-            });
-        }
-        return `<!-- ${tag.name} -->`;
+    private tagCallback(tag: Tag): TagHandler {
+        return factory(tag);
     }
 }
